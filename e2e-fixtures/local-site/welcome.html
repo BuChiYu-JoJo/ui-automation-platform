@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Local Demo - Welcome</title></head>
+<body>
+  <h1 data-testid="greeting">Welcome</h1>
+  <p data-testid="welcome-note">You are signed in to the local demo site.</p>
+  <script>
+    const user = new URLSearchParams(location.search).get("user") || "guest";
+    document.querySelector('[data-testid="greeting"]').textContent = "Welcome, " + user;
+  </script>
+</body>
+</html>

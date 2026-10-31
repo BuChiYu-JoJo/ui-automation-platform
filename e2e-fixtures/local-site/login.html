@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Local Demo - Login</title></head>
+<body>
+  <h1 data-testid="login-title">Sign in (local demo)</h1>
+  <form id="login-form">
+    <label>Username
+      <input data-testid="login-username" name="username" autocomplete="off">
+    </label>
+    <label>Password
+      <input data-testid="login-password" name="password" type="password">
+    </label>
+    <button data-testid="login-button" type="submit">Log in</button>
+  </form>
+  <p data-testid="login-error" hidden>Username and password are required.</p>
+  <script>
+    document.getElementById("login-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const u = document.querySelector('[data-testid="login-username"]').value.trim();
+      const p = document.querySelector('[data-testid="login-password"]').value;
+      if (!u || !p) { document.querySelector('[data-testid="login-error"]').hidden = false; return; }
+      location.href = "welcome.html?user=" + encodeURIComponent(u);
+    });
+  </script>
+</body>
+</html>

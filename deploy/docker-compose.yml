@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16
+    environment: { POSTGRES_USER: ${POSTGRES_USER:-uip}, POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}, POSTGRES_DB: ${POSTGRES_DB:-uip} }
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-uip}"], interval: 5s, timeout: 3s, retries: 10 }
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 10 }
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment: { MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}, MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD} }
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [miniodata:/data]
+    healthcheck: { test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"], interval: 5s, timeout: 3s, retries: 10 }
+  api:
+    build: { context: .., dockerfile: deploy/Dockerfile.api }
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-uip}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-uip}?schema=public
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      MASTER_KEY_B64: ${MASTER_KEY_B64}
+      JWT_SECRET: ${JWT_SECRET}
+    ports: ["3000:3000"]
+    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
+  worker:
+    build: { context: .., dockerfile: deploy/Dockerfile.worker }
+    shm_size: "2gb"   # Chromium /dev/shm 不足是容器崩溃常见原因，必须给足
+    environment:
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+    depends_on: { redis: { condition: service_healthy }, api: { condition: service_started } }
+  web:
+    build: { context: .., dockerfile: deploy/Dockerfile.web }
+    ports: ["5173:80"]
+    depends_on: [api]
+volumes: { pgdata: {}, miniodata: {} }

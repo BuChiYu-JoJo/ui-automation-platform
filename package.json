@@ -1,0 +1,13 @@
+{
+  "name": "ui-automation-platform",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "pnpm -r --filter=./packages/* build && pnpm --filter @uip/worker build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "demo:e2e": "pnpm build && pnpm --filter @uip/api build && node scripts/demo-e2e.mjs"
+  },
+  "devDependencies": { "typescript": "^5.6.3" }
+}

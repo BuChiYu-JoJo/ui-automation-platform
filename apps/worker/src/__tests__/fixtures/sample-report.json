@@ -1,0 +1,11 @@
+{
+  "suites": [{ "title": "example.spec.ts", "specs": [
+    { "title": "has title", "tests": [{ "results": [{ "status": "passed", "duration": 320 }] }] },
+    { "title": "flaky search", "tests": [{ "results": [
+      { "status": "failed", "duration": 900, "error": { "message": "timeout" } },
+      { "status": "passed", "duration": 410 }] }] },
+    { "title": "broken checkout", "tests": [{ "results": [
+      { "status": "failed", "duration": 1200, "error": { "message": "expect(title) to contain X" } }] }] }
+  ]}],
+  "stats": { "duration": 2830 }
+}

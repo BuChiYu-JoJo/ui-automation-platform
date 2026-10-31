@@ -1,0 +1,14 @@
+{
+  "dslVersion": "1",
+  "name": "示例：登录旅程（storageState 预设）",
+  "loginPreset": "example-user-role",
+  "_note": "示例文件：loginPreset 指向 平台×环境×角色 的加密 storageState，执行前由 Worker 注入；无真实凭证、无真实站点。",
+  "variables": { "homeTitle": "Example Domain" },
+  "steps": [
+    { "id": "s1", "type": "goto", "url": "https://example.com/", "comment": "打开首页（已带登录态）" },
+    { "id": "s2", "type": "assert_visible", "locator": { "strategy": "role", "value": "heading", "name": "Example Domain" }, "comment": "断言标题可见" },
+    { "id": "s3", "type": "assert_text", "locator": { "strategy": "role", "value": "heading", "name": "Example Domain" }, "expected": "{{homeTitle}}" },
+    { "id": "s4", "type": "assert_url", "expected": "example.com" },
+    { "id": "s5", "type": "screenshot", "comment": "留痕截图" }
+  ]
+}

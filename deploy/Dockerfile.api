@@ -1,0 +1,5 @@
+FROM node:22-slim
+WORKDIR /repo
+COPY . .
+RUN corepack enable && pnpm install --frozen-lockfile=false && pnpm --filter @uip/api exec prisma generate && pnpm --filter @uip/api build
+CMD ["node", "apps/api/dist/main.js"]

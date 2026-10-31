@@ -1,0 +1,5 @@
+FROM node:22-slim
+WORKDIR /repo
+COPY . .
+RUN corepack enable && pnpm install --frozen-lockfile=false && pnpm --filter @uip/worker... build && pnpm --filter @uip/worker exec playwright install --with-deps chromium
+CMD ["node", "apps/worker/dist/index.js"]

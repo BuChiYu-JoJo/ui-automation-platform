@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+test-results/
+playwright-report/
+artifacts-local/
+
+# demo artifacts (local stand-in for S3 layout)
+artifacts/

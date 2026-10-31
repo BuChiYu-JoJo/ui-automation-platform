@@ -1,0 +1,339 @@
+// 核心实体（报告 §6.4）。所有业务表预埋 tenant_id；执行永远绑定 case_version；密钥只存密文。
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  username     String
+  passwordHash String   @map("password_hash")
+  status       String   @default("active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, username])
+  @@map("user")
+}
+model Role {
+  id       String @id @default(uuid())
+  tenantId String @map("tenant_id")
+  name     String // platform_admin | project_admin | editor | viewer
+  @@unique([tenantId, name])
+  @@map("role")
+}
+model ProjectMember {
+  id        String @id @default(uuid())
+  tenantId  String @map("tenant_id")
+  projectId String @map("project_id")
+  userId    String @map("user_id")
+  role      String // admin | editor | viewer
+  project   Project @relation(fields: [projectId], references: [id])
+  @@unique([projectId, userId])
+  @@index([tenantId, projectId])
+  @@map("project_member")
+}
+model Project {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  name        String
+  slug        String
+  description String?
+  ownerId     String   @map("owner_id")
+  status      String   @default("active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  members     ProjectMember[]
+  environments Environment[]
+  cases       Case[]
+  @@unique([tenantId, slug])
+  @@map("project")
+}
+model Environment {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  projectId     String   @map("project_id")
+  name          String // prod | staging
+  baseUrl       String   @map("base_url")
+  browserConfig Json?    @map("browser_config")
+  isDefault     Boolean  @default(false) @map("is_default")
+  // Week 3: storageState 登录预设引用 {role: {key, savedAt, ttlSec}}；state 本体是 artifacts 里的加密文件，不进 DB
+  storageStatePresets Json? @map("storage_state_presets")
+  project       Project  @relation(fields: [projectId], references: [id])
+  variables     EnvVariable[]
+  @@index([tenantId, projectId])
+  @@map("environment")
+}
+model EnvVariable {
+  id            String  @id @default(uuid())
+  tenantId      String  @map("tenant_id")
+  environmentId String  @map("environment_id")
+  key           String
+  valuePlain    String? @map("value_plain")
+  valueCipher   String? @map("value_cipher") // isSecret 时信封加密密文，API 永不回显明文
+  isSecret      Boolean @default(false) @map("is_secret")
+  kind          String  @default("variable") // variable | storage_state | totp_seed
+  environment   Environment @relation(fields: [environmentId], references: [id])
+  @@unique([environmentId, key])
+  @@map("env_variable")
+}
+model Case {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  projectId       String   @map("project_id")
+  name            String
+  type            String // dsl | code
+  sourceRef       String?  @map("source_ref") // 代码轨: git 路径 / spec 文件夹约定
+  tags            String[]
+  ownerId         String?  @map("owner_id")
+  status          String   @default("active") // active | quarantined | disabled
+  quarantineUntil DateTime? @map("quarantine_until")
+  quarantineReason String?  @map("quarantine_reason")
+  project         Project  @relation(fields: [projectId], references: [id])
+  versions        CaseVersion[]
+  @@index([tenantId, projectId])
+  @@map("case")
+}
+model CaseVersion {
+  id             String   @id @default(uuid())
+  tenantId       String   @map("tenant_id")
+  caseId         String   @map("case_id")
+  versionNo      Int      @map("version_no")
+  dslJson        Json?    @map("dsl_json")        // DSL 轨
+  codeSnapshotRef String? @map("code_snapshot_ref") // 代码轨 commit
+  createdBy      String   @map("created_by")
+  changeNote     String?  @map("change_note")
+  createdAt      DateTime @default(now()) @map("created_at")
+  case           Case     @relation(fields: [caseId], references: [id])
+  @@unique([caseId, versionNo])
+  @@map("case_version")
+}
+model Plan {
+  id                String   @id @default(uuid())
+  tenantId          String   @map("tenant_id")
+  projectId         String   @map("project_id")
+  caseId            String   @map("case_id")
+  environmentId     String   @map("environment_id")
+  cronExpr          String   @map("cron_expr")
+  timezone          String   @default("Asia/Shanghai")
+  regions           String[]
+  enabled           Boolean  @default(true)
+  concurrencyPolicy String   @default("skip") @map("concurrency_policy") // skip | queue | parallel
+  failThreshold     Int      @default(3) @map("fail_threshold")          // 连续失败阈值
+  lastScheduledAt   DateTime? @map("last_scheduled_at") // Week 2: 调度游标（已处理到的最近触发点）
+  skippedCount      Int      @default(0) @map("skipped_count") // Week 2: skip 策略累计跳过数
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  @@index([tenantId, projectId])
+  @@map("plan")
+}
+// Week 2 新增：监控状态机当前态（每 plan 一行）。迁移历史以 Json 内嵌（量级小，不单开表）。
+// ⚠️ 本表为 Week 2 新增，schema 仍待 `prisma validate`（引擎下载被网络阻断，见 docs/PROGRESS.md 阻塞 #1），未经真实 DB 验证。
+model MonitorState {
+  id                   String   @id @default(uuid())
+  tenantId             String   @map("tenant_id")
+  projectId            String   @map("project_id")
+  planId               String   @map("plan_id")
+  status               String   @default("up") // up | suspect | down
+  consecutiveFailures  Int      @default(0) @map("consecutive_failures")
+  consecutiveSuccesses Int      @default(0) @map("consecutive_successes")
+  flakyCount           Int      @default(0) @map("flaky_count")
+  infraCount           Int      @default(0) @map("infra_count") // infra_failed 累计，不计业务失败
+  openIncidentId       String?  @map("open_incident_id")
+  lastExecutionId      String?  @map("last_execution_id")
+  lastTransitionAt     DateTime? @map("last_transition_at")
+  history              Json     @default("[]") // [{from,to,at,executionId,reason}]
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, planId])
+  @@index([tenantId, projectId])
+  @@map("monitor_state")
+}
+// Week 3 落地：加 project_id（列表/项目级查询）、duration_minutes + timezone（周期窗口）、created_by 与审计时间。
+// ⚠️ 同样未经 prisma validate（阻塞 #1 未解），启用 Prisma 时一并补验。
+model MaintenanceWindow {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  projectId String   @map("project_id")
+  scopeType String   @map("scope_type") // project | plan
+  scopeId   String   @map("scope_id")
+  cronExpr  String?  @map("cron_expr")
+  durationMinutes Int? @map("duration_minutes") // 周期窗口时长；一次性窗口为空
+  timezone  String   @default("Asia/Shanghai")
+  startsAt  DateTime? @map("starts_at")
+  endsAt    DateTime? @map("ends_at")
+  reason    String
+  createdBy String   @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@index([tenantId, scopeId])
+  @@index([tenantId, projectId])
+  @@map("maintenance_window")
+}
+// Week 3 新增：Worker 节点注册表。在线状态不落库，由 last_heartbeat_at + 60s 阈值派生。⚠️ 未经 prisma validate。
+model WorkerNode {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  name            String
+  region          String
+  totalSlots      Int      @default(4) @map("total_slots")
+  usedSlots       Int      @default(0) @map("used_slots")
+  browserVersion  String?  @map("browser_version")
+  lastHeartbeatAt DateTime? @map("last_heartbeat_at")
+  registeredAt    DateTime @default(now()) @map("registered_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  @@index([tenantId, region])
+  @@map("worker_node")
+}
+// Week 3 新增：quorum 组判定结果（group_id 即主键：一组只判一次，幂等）。⚠️ 未经 prisma validate。
+model GroupVerdict {
+  groupId        String   @id @map("group_id")
+  tenantId       String   @map("tenant_id")
+  projectId      String   @map("project_id")
+  planId         String   @map("plan_id")
+  scheduledAt    DateTime? @map("scheduled_at")
+  verdict        String // up | down | infra
+  degraded       Boolean  @default(false)
+  votes          Json // {region: executionStatus}
+  downVotes      Int      @default(0) @map("down_votes")
+  upVotes        Int      @default(0) @map("up_votes")
+  plannedRegions Int      @map("planned_regions")
+  judgedAt       DateTime @default(now()) @map("judged_at")
+  @@index([tenantId, planId])
+  @@map("group_verdict")
+}
+model Execution {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  projectId     String    @map("project_id")
+  planId        String?   @map("plan_id")
+  groupId       String?   @map("group_id") // Week 3: 多地域组标识（planId@scheduledAt），quorum 按组判定
+  caseVersionId String    @map("case_version_id")
+  environmentId String    @map("environment_id")
+  region        String?
+  workerId      String?   @map("worker_id")
+  triggerType   String    @map("trigger_type") // schedule | manual | ci
+  status        String    @default("queued") // queued|running|passed|failed|flaky|infra_failed|timeout|cancelled
+  attempt       Int       @default(1)
+  isRetryOf     String?   @map("is_retry_of")
+  scheduledAt   DateTime? @map("scheduled_at") // 与 planId 组成幂等键防重复触发
+  startedAt     DateTime? @map("started_at")
+  finishedAt    DateTime? @map("finished_at")
+  durationMs    Int?      @map("duration_ms")
+  snapshotJson  Json?     @map("snapshot_json") // 脱敏后的变量快照
+  stepResults   StepResult[]
+  artifacts     Artifact[]
+  // Week 3: 幂等键扩到 region（多地域同刻一组多条）。注意 PG 中 NULL region 互不相等，
+  // 单地域（region=null）的防重仍靠领域层游标 + findByPlanSlot 守卫，与 Week 2 口径一致。
+  @@unique([planId, scheduledAt, region])
+  @@index([projectId, startedAt(sort: Desc)])
+  @@index([groupId])
+  @@map("execution")
+}
+model StepResult {
+  id                  String  @id @default(uuid())
+  tenantId            String  @map("tenant_id")
+  executionId         String  @map("execution_id")
+  stepNo              Int     @map("step_no")
+  stepType            String  @map("step_type")
+  name                String
+  status              String // passed | failed | skipped | flaky
+  durationMs          Int     @default(0) @map("duration_ms")
+  errorMessage        String? @map("error_message")
+  locatorHealed       Boolean @default(false) @map("locator_healed")
+  screenshotArtifactId String? @map("screenshot_artifact_id")
+  execution           Execution @relation(fields: [executionId], references: [id])
+  @@index([executionId, stepNo])
+  @@map("step_result")
+}
+model Artifact {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  executionId String   @map("execution_id")
+  stepResultId String? @map("step_result_id")
+  kind        String // screenshot | video | trace | har | log
+  s3Key       String   @map("s3_key")
+  sizeBytes   BigInt   @default(0) @map("size_bytes")
+  expiresAt   DateTime @map("expires_at")
+  incidentLinked Boolean @default(false) @map("incident_linked") // Week 3: incident 关联保留 90 天
+  deletedAt   DateTime? @map("deleted_at") // Week 3: 过期清理软删（存储对象已删后打标）
+  execution   Execution @relation(fields: [executionId], references: [id])
+  @@index([expiresAt])
+  @@map("artifact")
+}
+model AlertRule {
+  id           String  @id @default(uuid())
+  tenantId     String  @map("tenant_id")
+  projectId    String  @map("project_id")
+  scopeType    String  @map("scope_type") // project | plan
+  scopeId      String  @map("scope_id")
+  condition    Json // 状态迁移 / quorum / 连续失败
+  channels     Json // [{channel, target}] 目标里只存配置/密文引用
+  escalationPolicy Json? @map("escalation_policy")
+  dedupWindowSec Int   @default(3600) @map("dedup_window_sec")
+  enabled      Boolean @default(true)
+  @@index([tenantId, projectId])
+  @@map("alert_rule")
+}
+model Incident {
+  id         String    @id @default(uuid())
+  tenantId   String    @map("tenant_id")
+  projectId  String    @map("project_id")
+  planId     String    @map("plan_id") // heartbeat 型 incident 复填 heartbeat id（非空约束），以 sourceType/sourceId 为准
+  sourceType String    @default("plan") @map("source_type") // Week 3: plan | heartbeat
+  sourceId   String?   @map("source_id") // Week 3: plan id 或 heartbeat id
+  status     String    @default("triggered") // triggered | acknowledged | resolved
+  startedAt  DateTime  @default(now()) @map("started_at")
+  ackAt      DateTime? @map("ack_at")
+  ackBy      String?   @map("ack_by")
+  resolvedAt DateTime? @map("resolved_at")
+  durationMs Int?      @map("duration_ms") // Week 2: resolved 时落定
+  escalateAt DateTime? @map("escalate_at")  // Week 2: ack 超时升级时间点（MVP 只落字段）
+  regionVotes Json?    @map("region_votes")
+  summary    String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  @@index([tenantId, projectId])
+  @@map("incident")
+}
+model NotificationLog {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  incidentId String?  @map("incident_id")
+  kind       String   @default("opened") // Week 2: opened | recovered | test（去重按 incident+kind 核查）
+  channel    String
+  target     String // 恒为掩码形态（scheme+host），不存完整 webhook URL
+  status     String // sent | failed
+  response   String?
+  sentAt     DateTime @default(now()) @map("sent_at")
+  @@map("notification_log")
+}
+// Week 3 转真实现：token 只存 sha256 哈希（明文创建时一次性返回），status 口径 pending | up | down。
+// ⚠️ token 列由 Week 1 骨架的明文 unique 改为 token_hash，属破坏性变更，迁移时旧数据作废重建（本就无真实数据）。
+model Heartbeat {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  projectId       String   @map("project_id")
+  tokenHash       String   @unique @map("token_hash")
+  tokenPrefix     String   @map("token_prefix")
+  name            String
+  expectIntervalSec Int    @map("expect_interval_sec")
+  alertRuleId     String?  @map("alert_rule_id")
+  lastSeenAt      DateTime? @map("last_seen_at")
+  status          String   @default("pending") // pending | up | down
+  openIncidentId  String?  @map("open_incident_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  @@index([tenantId, projectId])
+  @@map("heartbeat")
+}
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  actor     String
+  action    String
+  resource  String
+  summary   Json?
+  ip        String?
+  createdAt DateTime @default(now()) @map("created_at")
+  @@map("audit_log")
+}

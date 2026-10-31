@@ -1,0 +1,1 @@
+{"stats":{"duration":640},"suites":[{"specs":[{"tests":[{"results":[{"duration":300,"status":"passed"}]}],"title":"open login page"},{"tests":[{"results":[{"duration":210,"status":"passed"}]}],"title":"welcome heading visible"},{"tests":[{"results":[{"duration":130,"status":"passed"}]}],"title":"capture result"}],"title":"login.spec.ts"}]}

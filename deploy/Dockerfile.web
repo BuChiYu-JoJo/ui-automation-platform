@@ -1,0 +1,6 @@
+FROM node:22-slim AS build
+WORKDIR /repo
+COPY . .
+RUN corepack enable && pnpm install --frozen-lockfile=false && pnpm --filter @uip/web build
+FROM nginx:alpine
+COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
